@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, Search, Send, Sparkles, Upload, Mic, MicOff } from "lucide-react";
+import { RefreshCw, Search, Send, Sparkles, Upload, Mic, MicOff, X } from "lucide-react";
 import { ThemeToggle } from "../../components/theme-toggle";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
@@ -110,14 +110,18 @@ export default function ChatApp() {
     setVoiceLoopOn(false);
   }
 
-  function addMessage(role, content) {
+  function addMessage(role, content, imageUrl = null) {
     const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
-    setMessages((prev) => [...prev, { id, role, content }]);
+    setMessages((prev) => [...prev, { id, role, content, imageUrl }]);
     return id;
   }
 
   function updateMessage(id, content) {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content } : m)));
+  }
+
+  function removeMessage(id) {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
   }
 
   async function callJsonEndpoint(url, payload, { signal } = {}) {
@@ -292,7 +296,12 @@ export default function ChatApp() {
     setIsGenerating(true);
 
     const prompt = input.trim() ? input.trim() : "What's in this image?";
-    addMessage("user", prompt);
+    const displayPrompt = input.trim(); // Only show what user typed, or nothing if empty
+    
+    // Create local object URL for the image
+    const imageUrl = URL.createObjectURL(file);
+    
+    addMessage("user", displayPrompt, imageUrl);
     const assistantId = addMessage("assistant", "Analyzing image...");
 
     try {
@@ -359,8 +368,8 @@ export default function ChatApp() {
 
       const timeData = new Uint8Array(analyser.fftSize);
 
-      const VAD_THRESHOLD = 9; // lower = more sensitive (tune for your mic)
-      const SILENCE_MS = 400; // reduce latency
+      const VAD_THRESHOLD = 20; // higher = less sensitive to ignore background noise
+      const SILENCE_MS = 600; // slightly longer to avoid cutting off mid-sentence
 
       function rmsEstimate() {
         analyser.getByteTimeDomainData(timeData);
@@ -470,8 +479,16 @@ export default function ChatApp() {
           const transcription = data?.transcribedText || "";
           const responseText = data?.responseText || "";
 
-          if (transcription) addMessage("user", transcription);
-          updateMessage(assistantId, responseText);
+          // Remove the temporary thinking message
+          removeMessage(assistantId);
+
+          if (!transcription) {
+            // It was just noise, no text detected
+            return;
+          }
+
+          addMessage("user", transcription);
+          addMessage("assistant", responseText);
           setInput("");
 
           if (data?.audioBase64) {
@@ -488,9 +505,19 @@ export default function ChatApp() {
             }
           }
         } catch (e) {
-          if (e?.name === "AbortError") return;
-          updateMessage(assistantId, "");
-          setError(safeJsonError(e));
+          if (e?.name === "AbortError" || cancelVoiceRef.current) {
+            removeMessage(assistantId);
+            return;
+          }
+          
+          removeMessage(assistantId);
+          
+          // Ignore the specific transcription error for noise
+          const errMsg = safeJsonError(e);
+          // Also ignore "input is required" which happens when aborting speech synthesis
+          if (errMsg !== "Could not transcribe the audio." && !errMsg.includes("input is required")) {
+            setError(errMsg);
+          }
         } finally {
           if (turnId === voiceTurnIdRef.current) {
             voiceProcessingRef.current = false;
@@ -671,9 +698,9 @@ export default function ChatApp() {
             <Sparkles className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">AI Assistant</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Conversa</h1>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Groq-powered</span>
+              <span>by Rahul Jonas</span>
               {(reasoningOn || webSearchOn) && (
                 <>
                   <span>•</span>
@@ -705,9 +732,9 @@ export default function ChatApp() {
 
       {/* Main Chat Area */}
       <main className="relative z-0 flex flex-1 overflow-hidden">
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pb-40 pt-6 sm:px-6 md:pb-48">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pb-4 pt-6 sm:px-6">
           <div className="mx-auto max-w-3xl space-y-6">
-            {messages.length === 0 ? (
+            {messages.length === 0 && !voiceLoopOn ? (
               <div className="flex h-[60vh] flex-col items-center justify-center space-y-5 text-center">
                 <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-primary/10 shadow-sm">
                   <Sparkles className="h-8 w-8 text-primary" />
@@ -755,6 +782,16 @@ export default function ChatApp() {
                           : "max-w-[95%] rounded-3xl rounded-tl-sm bg-muted/50 px-5 py-3.5 text-foreground sm:max-w-[85%] border border-border/50 shadow-sm"
                       }
                     >
+                      {m.imageUrl && (
+                        <div className="mb-2">
+                          <img 
+                            src={m.imageUrl} 
+                            alt="Uploaded" 
+                            className="max-h-60 w-auto rounded-xl object-contain shadow-sm border border-primary/20 bg-background/50"
+                          />
+                        </div>
+                      )}
+                      
                       {m.content ? (
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
@@ -788,7 +825,7 @@ export default function ChatApp() {
                         >
                           {m.content}
                         </ReactMarkdown>
-                      ) : (
+                      ) : m.role === "assistant" ? (
                         <div className="flex items-center h-6">
                           <span className="flex gap-1">
                             <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
@@ -796,10 +833,24 @@ export default function ChatApp() {
                             <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
                           </span>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 ))}
+
+                {voiceLoopOn && !isGenerating && (
+                  <div className="flex w-full flex-col items-start gap-2">
+                    <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary">
+                        <Mic className="h-3 w-3 text-secondary-foreground animate-pulse" />
+                      </div>
+                      <span>Assistant</span>
+                    </div>
+                    <div className="max-w-[95%] rounded-3xl rounded-tl-sm bg-muted/50 px-5 py-3.5 text-foreground sm:max-w-[85%] border border-border/50 shadow-sm">
+                      <span className="text-muted-foreground italic">Listening...</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             
@@ -811,17 +862,18 @@ export default function ChatApp() {
       </main>
 
       {/* Input Area */}
-      <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background via-background/95 to-transparent pb-4 pt-12 sm:pb-6">
+      <div className="shrink-0 bg-background pb-4 pt-2 sm:pb-6">
         <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
           {error && (
-            <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-sm">
-              {error}
-            </div>
-          )}
-          {voiceLoopOn && (
-            <div className="mb-4 flex items-center justify-center gap-2 text-sm font-medium text-primary bg-primary/5 py-2 rounded-full border border-primary/10 w-fit mx-auto px-4">
-              <span className={`h-2.5 w-2.5 rounded-full ${isRecording ? "bg-destructive animate-pulse" : "bg-primary/60"}`} />
-              {isRecording ? "Listening (stop talking to send)..." : "Voice chat active..."}
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-sm">
+              <div className="flex-1">{error}</div>
+              <button 
+                onClick={() => setError("")}
+                className="ml-3 shrink-0 rounded-full p-1 opacity-70 hover:bg-destructive/20 hover:opacity-100 transition-all"
+                aria-label="Close error message"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
           )}
           

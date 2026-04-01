@@ -72,9 +72,10 @@ export async function POST(request) {
       "";
 
     if (!transcribedText.trim()) {
-      return new Response(JSON.stringify({ error: "Could not transcribe the audio." }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
+      return Response.json({
+        transcribedText: "",
+        responseText: "",
+        audioBase64: null,
       });
     }
 
@@ -96,15 +97,18 @@ export async function POST(request) {
     });
 
     // 3) text-to-speech (mirrors `scripts/text-to-speech.js` intent)
-    const speechResponse = await groq.audio.speech.create({
-      model: "canopylabs/orpheus-v1-english",
-      voice: "autumn",
-      input: responseText,
-      response_format: "wav",
-    });
+    let audioBase64 = null;
+    if (responseText.trim()) {
+      const speechResponse = await groq.audio.speech.create({
+        model: "canopylabs/orpheus-v1-english",
+        voice: "autumn",
+        input: responseText,
+        response_format: "wav",
+      });
 
-    const buffer = Buffer.from(await speechResponse.arrayBuffer());
-    const audioBase64 = buffer.toString("base64");
+      const buffer = Buffer.from(await speechResponse.arrayBuffer());
+      audioBase64 = buffer.toString("base64");
+    }
 
     return Response.json({
       transcribedText,
