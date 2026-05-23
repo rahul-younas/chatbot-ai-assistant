@@ -546,6 +546,15 @@ export default function ChatApp() {
           if (turnId === voiceTurnIdRef.current) {
             voiceProcessingRef.current = false;
             setIsGenerating(false);
+            
+            // Restart VAD loop for continuous listening
+            if (voiceLoopOnRef.current) {
+              setTimeout(() => {
+                if (voiceLoopOnRef.current && !vadRafRef.current) {
+                  startVoiceTurn();
+                }
+              }, 100);
+            }
           }
           if (voiceAbortRef.current === controller) {
             voiceAbortRef.current = null;
@@ -954,91 +963,92 @@ export default function ChatApp() {
             </div>
           )}
           
-          <div className="relative flex flex-col overflow-hidden rounded-3xl border border-border/50 bg-secondary backdrop-blur-xl shadow-lg transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 focus-within:shadow-primary/5">
+          {/* Options Buttons (Outside Main Input Div) */}
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <Button
+              variant={reasoningOn ? "secondary" : "ghost"}
+              size="sm"
+              className={`h-8 rounded-full px-3 text-xs font-medium transition-colors ${reasoningOn ? "bg-primary/10 text-primary hover:bg-primary/20" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => {
+                if (isGenerating || isRecording) return;
+                setReasoningOn((v) => !v);
+              }}
+              disabled={isGenerating || isRecording}
+              aria-label="Toggle reasoning mode"
+            >
+              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              Reasoning
+            </Button>
+            
+            <Button
+              variant={webSearchOn ? "secondary" : "ghost"}
+              size="sm"
+              className={`h-8 rounded-full px-3 text-xs font-medium transition-colors ${webSearchOn ? "bg-accent/20 text-accent-foreground hover:bg-accent/30" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => {
+                if (isGenerating || isRecording) return;
+                setWebSearchOn((v) => !v);
+              }}
+              disabled={isGenerating || isRecording}
+              aria-label="Toggle web search mode"
+            >
+              <Search className="mr-1.5 h-3.5 w-3.5" />
+              Web
+            </Button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => handleImageFile(e.target.files?.[0])}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-full px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              onClick={pickImage}
+              disabled={isGenerating || isRecording}
+            >
+              <Upload className="mr-1.5 h-3.5 w-3.5" />
+              Image
+            </Button>
+
+            <Button
+              variant={voiceLoopOn ? "destructive" : "ghost"}
+              size="sm"
+              className={`h-8 rounded-full px-3 text-xs font-medium transition-colors ${voiceLoopOn ? "" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={toggleVoice}
+              disabled={false}
+              aria-label="Toggle voice chat"
+            >
+              {voiceLoopOn ? <MicOff className="mr-1.5 h-3.5 w-3.5" /> : <Mic className="mr-1.5 h-3.5 w-3.5" />}
+              {voiceLoopOn ? "Stop Voice" : "Voice"}
+            </Button>
+          </div>
+          
+          {/* Main Input Div (Only Textarea + Send Button) */}
+          <div className="relative flex items-center gap-3 overflow-hidden rounded-3xl border border-border/50 bg-secondary backdrop-blur-xl shadow-lg transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 focus-within:shadow-primary/5 px-4 py-3">
             <Textarea
               value={input}
               onChange={onTextareaChange}
               onKeyDown={onTextareaKeyDown}
               placeholder="Ask anything..."
-              className="min-h-[60px] max-h-[200px] w-full resize-none border-0 bg-transparent px-5 py-4 text-base focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none sm:text-sm"
+              className="min-h-[48px] max-h-[200px] w-full resize-none border-0 bg-transparent py-1 text-base focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none sm:text-sm"
               rows={1}
               disabled={isGenerating}
             />
             
-            <div className="flex items-center justify-between px-3 pb-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Button
-                  variant={reasoningOn ? "secondary" : "ghost"}
-                  size="sm"
-                  className={`h-8 rounded-full px-3 text-xs font-medium transition-colors ${reasoningOn ? "bg-primary/10 text-primary hover:bg-primary/20" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => {
-                    if (isGenerating || isRecording) return;
-                    setReasoningOn((v) => !v);
-                  }}
-                  disabled={isGenerating || isRecording}
-                  aria-label="Toggle reasoning mode"
-                >
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                  Reasoning
-                </Button>
-                
-                <Button
-                  variant={webSearchOn ? "secondary" : "ghost"}
-                  size="sm"
-                  className={`h-8 rounded-full px-3 text-xs font-medium transition-colors ${webSearchOn ? "bg-accent/20 text-accent-foreground hover:bg-accent/30" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => {
-                    if (isGenerating || isRecording) return;
-                    setWebSearchOn((v) => !v);
-                  }}
-                  disabled={isGenerating || isRecording}
-                  aria-label="Toggle web search mode"
-                >
-                  <Search className="mr-1.5 h-3.5 w-3.5" />
-                  Web
-                </Button>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => handleImageFile(e.target.files?.[0])}
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 rounded-full px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={pickImage}
-                  disabled={isGenerating || isRecording}
-                >
-                  <Upload className="mr-1.5 h-3.5 w-3.5" />
-                  Image
-                </Button>
-
-                <Button
-                  variant={voiceLoopOn ? "destructive" : "ghost"}
-                  size="sm"
-                  className={`h-8 rounded-full px-3 text-xs font-medium transition-colors ${voiceLoopOn ? "" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={toggleVoice}
-                  disabled={false}
-                  aria-label="Toggle voice chat"
-                >
-                  {voiceLoopOn ? <MicOff className="mr-1.5 h-3.5 w-3.5" /> : <Mic className="mr-1.5 h-3.5 w-3.5" />}
-                  {voiceLoopOn ? "Stop Voice" : "Voice"}
-                </Button>
-              </div>
-              
-              <Button
-                size="icon"
-                className={`h-8 w-8 shrink-0 rounded-full transition-all sm:h-9 sm:w-9 ${userCanSend ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:scale-105" : "bg-muted text-muted-foreground opacity-50"}`}
-                onClick={handleSend}
-                disabled={!userCanSend}
-                aria-label="Send message"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
+            <Button
+              size="icon"
+              className={`h-10 w-10 shrink-0 rounded-full transition-all flex items-center justify-center ${userCanSend ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:scale-105" : "bg-muted text-muted-foreground opacity-50"}`}
+              onClick={handleSend}
+              disabled={!userCanSend}
+              aria-label="Send message"
+            >
+              <Send className="h-5 w-5" />
+            </Button>
           </div>
+          
           <div className="mt-3 text-center text-xs text-foreground">
             AI can make mistakes. Please verify important information.
           </div>
