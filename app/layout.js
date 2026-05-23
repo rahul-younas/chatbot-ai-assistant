@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Groq Chat Bot",
-  description: "A Next.js Groq-powered chatbot UI",
+  title: "Conversa by Rahul Jonas",
+  description: "A Next.js chatbot UI",
 };
 
 export const viewport = {

@@ -386,11 +386,14 @@ export default function ChatApp() {
 
       const timeData = new Uint8Array(analyser.fftSize);
 
-      const VAD_THRESHOLD = 35; // much higher = much less sensitive to ignore all minor background noises
-      const SILENCE_MS = 1000; // longer silence to stop recording
+      const SILENCE_MS = 1500; // slightly longer silence to ensure they stopped speaking
       const MIN_SPEECH_MS = 300; // must speak for at least this long before it counts
+      const VAD_OFFSET = 15; // RMS must be this much above the noise floor to count as speech
 
       let speechStartedAt = 0;
+      let smoothedRms = 0;
+      let noiseFloor = 0;
+      let framesCount = 0;
 
       function rmsEstimate() {
         analyser.getByteTimeDomainData(timeData);
@@ -400,7 +403,23 @@ export default function ChatApp() {
           sumSq += v * v;
         }
         const meanSq = sumSq / timeData.length;
-        return Math.sqrt(meanSq);
+        const currentRms = Math.sqrt(meanSq);
+        
+        // Initialize noise floor quickly on first frames
+        if (framesCount < 50) {
+          noiseFloor = noiseFloor === 0 ? currentRms : (noiseFloor * 0.9 + currentRms * 0.1);
+          framesCount++;
+        } else {
+          // Update noise floor slowly, only when it's relatively quiet
+          // This prevents the noise floor from rising during actual speech
+          if (currentRms < noiseFloor + 10) {
+            noiseFloor = noiseFloor * 0.99 + currentRms * 0.01;
+          }
+        }
+
+        // Simple low-pass filter to smooth out transient noise spikes
+        smoothedRms = smoothedRms * 0.8 + currentRms * 0.2;
+        return smoothedRms;
       }
 
       function startRecordingSegment() {
@@ -570,7 +589,10 @@ export default function ChatApp() {
         const audioPlaying =
           audioPlayerRef.current && !audioPlayerRef.current.paused;
 
-        if (rms > VAD_THRESHOLD) {
+        // Dynamic threshold based on noise floor
+        const currentThreshold = Math.max(noiseFloor + VAD_OFFSET, 20); // enforce a minimum threshold of 20
+
+        if (rms > currentThreshold) {
           speechDetectedRef.current = true;
           lastSpeechAtRef.current = Date.now();
 
