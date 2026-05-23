@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, Search, Send, Sparkles, Upload, Mic, MicOff, X } from "lucide-react";
+import { RefreshCw, Search, Send, Sparkles, Upload, Mic, MicOff, X, Copy, Edit3, Check } from "lucide-react";
 import { ThemeToggle } from "../../components/theme-toggle";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
@@ -30,6 +30,18 @@ export default function ChatApp() {
   const [input, setInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
+  const [copiedId, setCopiedId] = useState(null);
+
+  // Helper function to copy text to clipboard
+  async function handleCopy(text, id) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy text: ", err);
+    }
+  }
 
   const [isRecording, setIsRecording] = useState(false);
   const cancelVoiceRef = useRef(false);
@@ -191,9 +203,12 @@ export default function ChatApp() {
           ? "/api/groq/chat/reasoning"
           : "/api/groq/chat/text-to-text";
 
+      // Filter out id field which Groq doesn't accept
+      const sanitizedHistory = messages.map(m => ({ role: m.role, content: m.content }));
+
       const data = await callJsonEndpoint(
         endpoint,
-        { prompt },
+        { prompt, conversationHistory: sanitizedHistory },
         { signal: controller.signal }
       );
 
@@ -228,9 +243,12 @@ export default function ChatApp() {
     addMessage("user", query);
     const assistantId = addMessage("assistant", "Searching the web...");
     try {
+      // Filter out id field which Groq doesn't accept
+      const sanitizedHistory = messages.map(m => ({ role: m.role, content: m.content }));
+      
       const data = await callJsonEndpoint(
         "/api/groq/chat/web-search",
-        { query, includeReasoning: reasoningOn },
+        { query, includeReasoning: reasoningOn, conversationHistory: sanitizedHistory },
         { signal: controller.signal }
       );
       const text = data?.text || "";
@@ -368,8 +386,11 @@ export default function ChatApp() {
 
       const timeData = new Uint8Array(analyser.fftSize);
 
-      const VAD_THRESHOLD = 20; // higher = less sensitive to ignore background noise
-      const SILENCE_MS = 600; // slightly longer to avoid cutting off mid-sentence
+      const VAD_THRESHOLD = 35; // much higher = much less sensitive to ignore all minor background noises
+      const SILENCE_MS = 1000; // longer silence to stop recording
+      const MIN_SPEECH_MS = 300; // must speak for at least this long before it counts
+
+      let speechStartedAt = 0;
 
       function rmsEstimate() {
         analyser.getByteTimeDomainData(timeData);
@@ -465,6 +486,9 @@ export default function ChatApp() {
         try {
           const formData = new FormData();
           formData.append("audio", audioBlob, "voice.webm");
+          // Filter out id field which Groq doesn't accept
+          const sanitizedHistory = messages.map(m => ({ role: m.role, content: m.content }));
+          formData.append("conversationHistory", JSON.stringify(sanitizedHistory));
 
           const data = await callFormEndpoint(
             "/api/groq/chat/voice-chat",
@@ -541,6 +565,11 @@ export default function ChatApp() {
           speechDetectedRef.current = true;
           lastSpeechAtRef.current = Date.now();
 
+          // If speech just started, mark the time
+          if (!speechStartedAt) {
+            speechStartedAt = Date.now();
+          }
+
           // If the assistant is speaking and you start talking, stop audio instantly.
           if (audioPlaying) {
             try {
@@ -556,10 +585,17 @@ export default function ChatApp() {
             voiceAbortRef.current?.abort?.();
           }
 
+          // Only start recording if we've had speech for longer than MIN_SPEECH_MS
           if (!recordingActiveRef.current) {
-            startRecordingSegment();
+            const speechDuration = Date.now() - speechStartedAt;
+            if (speechDuration >= MIN_SPEECH_MS) {
+              startRecordingSegment();
+            }
           }
         } else {
+          // Reset speech start time when silence
+          speechStartedAt = 0;
+
           // Stop current recording when silence is long enough.
           if (recordingActiveRef.current) {
             const silenceFor = Date.now() - lastSpeechAtRef.current;
@@ -748,7 +784,8 @@ export default function ChatApp() {
               </div>
             ) : (
               <div className="space-y-6">
-                {messages.map((m) => (
+                {messages.map((m) => {
+                  return (
                   <div
                     key={m.id}
                     className={
@@ -770,7 +807,7 @@ export default function ChatApp() {
                           <div className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary">
                             <Sparkles className="h-3 w-3 text-secondary-foreground" />
                           </div>
-                          <span>Assistant</span>
+                          <span>Conversa</span>
                         </>
                       )}
                     </div>
@@ -796,7 +833,12 @@ export default function ChatApp() {
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           components={{
-                            p: ({ node, ...props }) => <p className="leading-relaxed mb-3 last:mb-0" {...props} />,
+                            p: ({ node, ...props }) => (
+                              <p 
+                                className="leading-relaxed mb-3 last:mb-0" 
+                                {...props} 
+                              />
+                            ),
                             h1: ({ node, ...props }) => <h1 className="mt-5 mb-3 text-2xl font-semibold tracking-tight" {...props} />,
                             h2: ({ node, ...props }) => <h2 className="mt-5 mb-3 text-xl font-semibold tracking-tight" {...props} />,
                             h3: ({ node, ...props }) => <h3 className="mt-4 mb-2 text-lg font-semibold tracking-tight" {...props} />,
@@ -809,8 +851,18 @@ export default function ChatApp() {
                             th: ({ node, ...props }) => <th className="border-b border-border/50 bg-muted/50 px-4 py-2.5 text-left font-medium" {...props} />,
                             td: ({ node, ...props }) => <td className="border-b border-border/50 px-4 py-2.5 last:border-0" {...props} />,
                             a: ({ node, ...props }) => <a className="font-medium underline underline-offset-4 hover:text-primary transition-colors" target="_blank" rel="noreferrer" {...props} />,
-                            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-4 space-y-1.5 last:mb-0" {...props} />,
-                            ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-4 space-y-1.5 last:mb-0" {...props} />,
+                            ul: ({ node, ...props }) => (
+                              <ul 
+                                className="list-disc pl-5 mb-4 space-y-1.5 last:mb-0" 
+                                {...props} 
+                              />
+                            ),
+                            ol: ({ node, ...props }) => (
+                              <ol 
+                                className="list-decimal pl-5 mb-4 space-y-1.5 last:mb-0" 
+                                {...props} 
+                              />
+                            ),
                             blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-primary/50 bg-muted/30 py-2 pr-4 pl-4 italic text-muted-foreground my-4 rounded-r-lg" {...props} />,
                             pre: ({ node, ...props }) => <pre className="my-4 overflow-x-auto rounded-xl bg-zinc-950 p-4 text-zinc-50 dark:bg-zinc-900 border border-border/20 shadow-sm" {...props} />,
                             code: ({ node, className, ...props }) => {
@@ -835,8 +887,33 @@ export default function ChatApp() {
                         </div>
                       ) : null}
                     </div>
+                    
+                    {/* Action buttons */}
+                    {m.content && !isGenerating && (
+                      <div className="flex items-center gap-2 px-1">
+                        <button
+                          onClick={() => handleCopy(m.content, m.id)}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors p-1 rounded-full hover:bg-muted/50"
+                        >
+                          {copiedId === m.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                          <span className="hidden sm:inline">{copiedId === m.id ? "Copied!" : "Copy"}</span>
+                        </button>
+                        
+                        {m.role === "user" && (
+                          <button
+                            onClick={() => {
+                              setInput(m.content);
+                            }}
+                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors p-1 rounded-full hover:bg-muted/50"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Edit</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ))}
+                )})}
 
                 {voiceLoopOn && !isGenerating && (
                   <div className="flex w-full flex-col items-start gap-2">
@@ -862,8 +939,8 @@ export default function ChatApp() {
       </main>
 
       {/* Input Area */}
-      <div className="shrink-0 bg-background pb-4 pt-2 sm:pb-6">
-        <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
+      <div className="shrink-0 bg-background pb-2 pt-2">
+        <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 ">
           {error && (
             <div className="mb-4 flex items-center justify-between rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-sm">
               <div className="flex-1">{error}</div>
@@ -877,7 +954,7 @@ export default function ChatApp() {
             </div>
           )}
           
-          <div className="relative flex flex-col overflow-hidden rounded-3xl border border-border/50 bg-background/60 backdrop-blur-xl shadow-lg transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 focus-within:shadow-primary/5">
+          <div className="relative flex flex-col overflow-hidden rounded-3xl border border-border/50 bg-secondary backdrop-blur-xl shadow-lg transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 focus-within:shadow-primary/5">
             <Textarea
               value={input}
               onChange={onTextareaChange}
@@ -962,7 +1039,7 @@ export default function ChatApp() {
               </Button>
             </div>
           </div>
-          <div className="mt-3 text-center text-xs text-muted-foreground/70">
+          <div className="mt-3 text-center text-xs text-foreground">
             AI can make mistakes. Please verify important information.
           </div>
         </div>

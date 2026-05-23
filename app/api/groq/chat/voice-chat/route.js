@@ -40,6 +40,15 @@ export async function POST(request) {
   try {
     const formData = await request.formData();
     const audioBlob = formData.get("audio");
+    const conversationHistoryStr = formData.get("conversationHistory");
+    let conversationHistory = [];
+    if (conversationHistoryStr) {
+      try {
+        conversationHistory = JSON.parse(conversationHistoryStr);
+      } catch {
+        conversationHistory = [];
+      }
+    }
 
     if (!audioBlob) {
       return new Response(JSON.stringify({ error: "Missing `audio`." }), {
@@ -87,8 +96,9 @@ export async function POST(request) {
         {
           role: "system",
           content:
-            "You are a helpful assistant. Respond in Markdown. Be precise, authentic, and concise. Keep under ~90 words for voice playback. and don't create headings. If user talks to you in English then generate response in English. If user talks to you in urdu then generate response in urdu.",
+            "You are a helpful assistant named Conversa. Respond in Markdown. Be precise, authentic, and concise. Keep under ~90 words for voice playback. and don't create headings. If user talks to you in English then generate response in English. If user talks to you in urdu then generate response in urdu. If someone asks your name, say your name is Conversa. If someone asks who created you, say you were created by Rahul Jonas on 24 Feb, 2024.",
         },
+        ...conversationHistory,
         { role: "user", content: transcribedText },
       ],
       temperature: 0.5,

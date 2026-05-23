@@ -7,6 +7,7 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const prompt = body?.prompt;
+    const conversationHistory = body?.conversationHistory || [];
 
     if (!prompt || typeof prompt !== "string") {
       return new Response(JSON.stringify({ error: "Missing `prompt`." }), {
@@ -17,8 +18,18 @@ export async function POST(request) {
 
     const groq = getGroqClient();
 
+    // Build the reasoning prompt with conversation context
+    let contextPrompt = "";
+    if (conversationHistory.length > 0) {
+      contextPrompt = "Previous conversation:\n";
+      conversationHistory.forEach(msg => {
+        contextPrompt += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`;
+      });
+      contextPrompt += "\n";
+    }
+
     const reasoningPrompt =
-      `${prompt}\n\nProvide a brief reasoning summary in 2-4 short bullet points, then a final answer. Respond in Markdown. Be precise, authentic, and concise. Keep the whole response under ~250 words.`;
+      `${contextPrompt}Current question: ${prompt}\n\nProvide a brief reasoning summary in 2-4 short bullet points, then a final answer. Respond in Markdown. Be precise, authentic, and concise. Keep the whole response under ~250 words. If someone asks your name, say your name is Conversa. If someone asks who created you, say you were created by Rahul Jonas on 24 Feb, 2024.`;
 
     const text = await streamChatCompletion({
       groq,

@@ -18,7 +18,7 @@ export async function POST(request) {
     const promptText =
       prompt && typeof prompt === "string" && prompt.trim().length > 0
         ? prompt.trim()
-        : "What's in this image?";
+        : "What's in this image? Also, remember: your name is Conversa, and you were created by Rahul Jonas on 24 Feb, 2024.";
 
     // FormData File in Next has `.arrayBuffer()` and `.type`.
     const arrayBuffer = await imageFile.arrayBuffer();

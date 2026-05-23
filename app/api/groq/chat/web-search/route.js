@@ -7,6 +7,7 @@ export async function POST(request) {
     const body = await request.json();
     const query = body?.query;
     const includeReasoning = body?.includeReasoning;
+    const conversationHistory = body?.conversationHistory || [];
 
     if (!query || typeof query !== "string") {
       return new Response(JSON.stringify({ error: "Missing `query`." }), {
@@ -17,6 +18,16 @@ export async function POST(request) {
 
     const groq = getGroqClient();
 
+    // Build context string from conversation history
+    let contextString = "";
+    if (conversationHistory.length > 0) {
+      contextString = "Previous conversation:\n";
+      conversationHistory.forEach(msg => {
+        contextString += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`;
+      });
+      contextString += "\n";
+    }
+
     // Mirrors the goal of `scripts/we-search.js`: use the `groq/compound` model
     // to run web search tool calls and then return content + results.
     const response = await groq.chat.completions.create({
@@ -25,13 +36,14 @@ export async function POST(request) {
         {
           role: "user",
           content:
-            `Find the most recent web updates about: ${query}\n\n` +
+            `${contextString}Find the most recent web updates about: ${query}\n\n` +
             (includeReasoning
               ? "First provide a brief reasoning summary in 2-4 bullet points, then the final answer.\n"
               : "") +
             "Return the final answer in Markdown. Be precise, authentic, and concise. " +
             "Keep under ~250 words unless the user asks for more. " +
-            "Use tool search results if available and include 3-6 sources (URLs preferred).",
+            "Use tool search results if available and include 3-6 sources (URLs preferred). " +
+            "If someone asks your name, say your name is Conversa. If someone asks who created you, say you were created by Rahul Jonas on 24 Feb, 2024.",
         },
       ],
       temperature: 0.4,
